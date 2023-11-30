@@ -1,0 +1,19 @@
+#!/bin/sh -e
+
+export PREFIX=""
+if [ -d '.venv' ] ; then
+    export PREFIX=".venv/bin/"
+fi
+
+# Keep pip up to date
+${PREFIX}pip install -U pip
+
+# Install poetry if not already installed
+if ! [ -x "$(command -v poetry)" ] ; then
+    printf "poetry missing, installing now...\n"
+    ${PREFIX}pip install -U poetry
+else
+    export PREFIX=""
+fi
+
+${PREFIX}poetry install

@@ -1,0 +1,8 @@
+#!/bin/bash -e
+
+export PREFIX=""
+if [ -d '.venv' ] ; then
+    export PREFIX=".venv/bin/"
+fi
+
+${PREFIX}pytest -x ${1-"./tests"}

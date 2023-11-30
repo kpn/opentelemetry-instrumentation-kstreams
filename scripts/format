@@ -1,0 +1,12 @@
+#!/bin/bash -e
+
+export PREFIX=""
+if [ -d '.venv' ] ; then
+    export PREFIX=".venv/bin/"
+fi
+
+# From now on, we want to see executed commands
+set -x
+
+${PREFIX}ruff src tests --fix
+${PREFIX}ruff format src tests
