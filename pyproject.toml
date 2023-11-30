@@ -1,0 +1,55 @@
+[tool.poetry]
+name = "opentelemetry-instrumentation-kstreams"
+version = "0.0.1"
+description = "OTEL for kstreams"
+authors = ["Santiago Fraire Willemoes <santiago.fraire@kpn.com>"]
+readme = "README.md"
+packages = [
+    { include = "opentelemetry_instrumentation_kstreams", from = "src" },
+]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+opentelemetry-api = "^1.21.0"
+opentelemetry-instrumentation = "^0.42b0"
+opentelemetry-semantic-conventions = "^0.42b0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.1.3"
+pytest = "^7.4"
+mypy = "^1.6"
+ipython = "^7"
+
+
+[tool.poetry.group.instruments.dependencies]
+kstreams = "^0.12.6"
+
+[tool.poetry.group.test.dependencies]
+opentelemetry-test-utils = "^0.42b0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff.isort]
+known-first-party = ["opentelemetry_instrumentation_kstreams", "tests"]
+
+[tool.commitizen]
+version_provider = "poetry"
+name = "cz_kpn"
+bump_message = "BUMP: version $current_version → $new_version"
+tag_format = "$version"
+version_files = [
+    "README.md:^Version",
+    "src/opentelemetry_instrumentation_kstreams/version.py:__version__",
+
+]
+update_changelog_on_bump = true
+major_version_zero = true # Remove this for next one to go to v1.0
+
+[tool.mypy]
+ignore_missing_imports = true
+mypy_path = "src"
+
+[tool.poetry.plugins.opentelemetry_instrumentor]
+kstreams = "opentelemetry_instrumentation_kstreams:KStreamsInstrumentor"

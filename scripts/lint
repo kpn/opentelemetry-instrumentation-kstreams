@@ -1,0 +1,13 @@
+#!/bin/bash -e
+
+export PREFIX=""
+if [ -d '.venv' ] ; then
+    export PREFIX=".venv/bin/"
+fi
+
+# From now on, we want to see executed commands
+set -x
+
+${PREFIX}ruff format --check src tests
+${PREFIX}ruff src/ tests/
+${PREFIX}mypy src/ tests
