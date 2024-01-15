@@ -16,4 +16,4 @@ else
     export PREFIX=""
 fi
 
-${PREFIX}poetry install
+${PREFIX}poetry install -E instruments
