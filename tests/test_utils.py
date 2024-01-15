@@ -110,9 +110,7 @@ class TestUtils(TestCase):
         )
 
         extract_bootstrap_servers.assert_called_once_with(stream_engine.backend)
-        extract_send_partition.assert_called_once_with(
-            self.args, self.kwargs
-        )
+        extract_send_partition.assert_called_once_with(self.args, self.kwargs)
         tracer.start_as_current_span.assert_called_once_with(
             expected_span_name, kind=SpanKind.PRODUCER
         )
@@ -123,7 +121,7 @@ class TestUtils(TestCase):
             extract_bootstrap_servers.return_value,
             self.topic_name,
             extract_send_partition.return_value,
-            client_id
+            client_id,
         )
 
         set_span_in_context.assert_called_once_with(span)
