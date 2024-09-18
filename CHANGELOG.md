@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.2 (2024-09-18)
+
+### Improvements
+
+- Bump deps
+- Bump dev deps
+
 ## 0.1.1 (2024-01-15)
 
 ### Fixes
