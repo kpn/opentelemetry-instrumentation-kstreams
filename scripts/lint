@@ -9,5 +9,5 @@ fi
 set -x
 
 ${PREFIX}ruff format --check src tests
-${PREFIX}ruff src/ tests/
+${PREFIX}ruff check src/ tests/
 ${PREFIX}mypy src/ tests
