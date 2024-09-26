@@ -7,6 +7,9 @@ from kstreams.backends.kafka import Kafka
 from opentelemetry import propagate, context, trace
 from opentelemetry.propagators import textmap
 from opentelemetry.semconv.trace import SpanAttributes
+
+# Enable after 0.49 is released
+# from opentelemetry.semconv._incubating.attributes import messaging_attributes as SpanAttributes
 from opentelemetry.trace import SpanKind, Tracer
 from opentelemetry.trace.span import Span
 from opentelemetry.context.context import Context
@@ -19,7 +22,6 @@ HeadersT = list[tuple[str, bytes | None]] | dict[str, str | None]
 
 class KStreamsContextGetter(textmap.Getter[HeadersT]):
     def get(self, carrier: HeadersT, key: str) -> Optional[List[str]]:
-        print("Getting context!!!", carrier, key)
         if carrier is None:
             return None
         carrier_items: Iterable = carrier
@@ -29,7 +31,6 @@ class KStreamsContextGetter(textmap.Getter[HeadersT]):
         for item_key, value in carrier_items:
             if item_key == key:
                 if value is not None:
-                    print("Found context, here you goooo", value)
                     return [value.decode()]
         return None
 
@@ -88,10 +89,20 @@ class KStreamsKafkaExtractor:
         )
 
     @staticmethod
-    def extract_send_partition(args: Any, kwargs: Any) -> Any:
-        return KStreamsKafkaExtractor._extract_argument(
-            "partition", 4, None, args, kwargs
-        )
+    def extract_send_partition(record_metadata: Any) -> Any:
+        if hasattr(record_metadata, "partition"):
+            return record_metadata.partition
+
+    @staticmethod
+    def extract_send_offset(record_metadata: Any) -> Any:
+        if hasattr(record_metadata, "offset"):
+            return record_metadata.offset
+
+    @staticmethod
+    def extract_consumer_group(consumer: Any) -> Optional[str]:
+        if hasattr(consumer, "group_id"):
+            return consumer.group_id
+        return None
 
     @staticmethod
     def extract_producer_client_id(instance: StreamEngine) -> Optional[str]:
@@ -106,14 +117,12 @@ class KStreamsKafkaExtractor:
         return instance.consumer._client._client_id
 
 
-def _enrich_span(
+def _enrich_base_span(
     span: Span,
     bootstrap_servers: List[str],
     topic: str,
-    partition: Optional[int],
     client_id: Optional[str],
-    offset: Optional[int] = None,
-):
+) -> None:
     """
     Enriches the given span with Kafka-related attributes.
 
@@ -140,24 +149,40 @@ def _enrich_span(
     if client_id is not None:
         span.set_attribute(SpanAttributes.MESSAGING_KAFKA_CLIENT_ID, client_id)
 
-    if span.is_recording():
-        if offset is not None:
-            span.set_attribute(SpanAttributes.MESSAGING_KAFKA_MESSAGE_OFFSET, offset)
-        if partition is not None:
-            span.set_attribute(SpanAttributes.MESSAGING_KAFKA_PARTITION, partition)
-        if offset and partition:
-            span.set_attribute(
-                SpanAttributes.MESSAGING_MESSAGE_ID,
-                f"{topic}.{partition}.{offset}",
-            )
+
+def _enrich_span_with_record_info(
+    span: Span, topic: str, partition: Optional[int], offset: Optional[int] = None
+) -> None:
+    """Used both by consumer and producer spans
+
+    It's in a different function because send needs to be injected with the span
+    info, but we want to be able to keep updating the span with the record info
+
+    Args:
+        span: The span to enrich.
+        topic: The Kafka topic name.
+        partition: The partition number, if available.
+        offset: The message offset, if available. Defaults to None.
+    Returns:
+        None
+    """
+    if offset is not None:
+        span.set_attribute(SpanAttributes.MESSAGING_KAFKA_MESSAGE_OFFSET, offset)
+    if partition is not None:
+        span.set_attribute(SpanAttributes.MESSAGING_KAFKA_PARTITION, partition)
+    if offset is not None and partition is not None:
+        span.set_attribute(
+            SpanAttributes.MESSAGING_MESSAGE_ID,
+            f"{topic}.{partition}.{offset}",
+        )
 
 
-def _get_span_name(operation: str, topic: str):
+def _get_span_name(operation: str, topic: str) -> str:
     return f"{topic} {operation}"
 
 
 def _wrap_send(tracer: Tracer) -> Callable:
-    async def _traced_send(func, instance: StreamEngine, args, kwargs):
+    async def _traced_send(func, instance: StreamEngine, args, kwargs) -> Any:
         if not isinstance(instance.backend, Kafka):
             raise NotImplementedError("Only Kafka backend is supported for now")
 
@@ -166,24 +191,27 @@ def _wrap_send(tracer: Tracer) -> Callable:
         if headers is None:
             headers = []
             kwargs["headers"] = headers
-
-        topic = KStreamsKafkaExtractor.extract_send_topic(args, kwargs)
+        client_id = KStreamsKafkaExtractor.extract_producer_client_id(instance)
         bootstrap_servers = KStreamsKafkaExtractor.extract_bootstrap_servers(
             instance.backend
         )
-        partition = KStreamsKafkaExtractor.extract_send_partition(args, kwargs)
-        client_id = KStreamsKafkaExtractor.extract_producer_client_id(instance)
+        topic = KStreamsKafkaExtractor.extract_send_topic(args, kwargs)
 
         span_name = _get_span_name("send", topic)
         with tracer.start_as_current_span(span_name, kind=SpanKind.PRODUCER) as span:
-            _enrich_span(span, bootstrap_servers, topic, partition, client_id)
+            _enrich_base_span(span, bootstrap_servers, topic, client_id)
             propagate.inject(
                 headers,
                 context=trace.set_span_in_context(span),
                 setter=_kstreams_setter,
             )
+            record_metadata = await func(*args, **kwargs)
 
-        return await func(*args, **kwargs)
+            partition = KStreamsKafkaExtractor.extract_send_partition(record_metadata)
+            offset = KStreamsKafkaExtractor.extract_send_offset(record_metadata)
+            _enrich_span_with_record_info(span, topic, partition, offset)
+
+        return record_metadata
 
     return _traced_send
 
@@ -194,6 +222,7 @@ def _create_consumer_span(
     extracted_context: Context,
     bootstrap_servers: List[str],
     client_id: str,
+    consumer_group: Optional[str],
     args: Any,
     kwargs: Any,
 ) -> None:
@@ -220,7 +249,20 @@ def _create_consumer_span(
     ) as span:
         new_context = trace.set_span_in_context(span, extracted_context)
         token = context.attach(new_context)
-        _enrich_span(span, bootstrap_servers, record.topic, record.partition, client_id, record.offset)
+        _enrich_base_span(
+            span,
+            bootstrap_servers,
+            record.topic,
+            client_id,
+        )
+        _enrich_span_with_record_info(
+            span, record.topic, record.partition, record.offset
+        )
+        # TODO: enable after 0.49 is released
+        # if consumer_group is not None:
+        #     span.set_attribute(
+        #         SpanAttributes.MESSAGING_CONSUMER_GROUP_NAME, consumer_group
+        #     )
 
         context.detach(token)
 
@@ -236,6 +278,10 @@ def _wrap_anext(
             instance.backend
         )
         client_id = KStreamsKafkaExtractor.extract_consumer_client_id(instance)
+        # consumer_group = KStreamsKafkaExtractor.extract_consumer_group(
+        #     instance.consumer
+        # )
+        consumer_group = None
         extracted_context: Context = propagate.extract(
             record.headers, getter=_kstreams_getter
         )
@@ -246,6 +292,7 @@ def _wrap_anext(
             extracted_context,
             bootstrap_servers,
             client_id,
+            consumer_group,
             args,
             kwargs,
         )
