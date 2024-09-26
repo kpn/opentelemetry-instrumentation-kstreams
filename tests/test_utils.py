@@ -212,7 +212,12 @@ class TestUtils(TestCase):
         attach.assert_called_once_with(set_span_in_context.return_value)
 
         enrich_span.assert_called_once_with(
-            span, bootstrap_servers, record.topic, record.partition, client_id
+            span,
+            bootstrap_servers,
+            record.topic,
+            record.partition,
+            client_id,
+            record.offset,
         )
         # consume_hook.assert_called_once_with(span, record, self.args, self.kwargs)
         detach.assert_called_once_with(attach.return_value)
