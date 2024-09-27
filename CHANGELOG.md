@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.0 (2024-09-27)
+
+### Features
+
+- add new metadata to send span
+
+### Fixes
+
+- Improve typings
+- Types and iron out bugs, and include offset
+
 ## 0.1.2 (2024-09-18)
 
 ### Improvements
