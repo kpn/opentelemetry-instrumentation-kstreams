@@ -17,7 +17,6 @@ import asyncio
 from unittest import TestCase, mock
 
 from opentelemetry_instrumentation_kstreams.utils import (
-    KStreamsKafkaExtractor,
     _create_consumer_span,
     _get_span_name,
     _kstreams_getter,
@@ -43,7 +42,7 @@ class TestUtils(TestCase):
     @mock.patch(
         "opentelemetry_instrumentation_kstreams.utils.KStreamsKafkaExtractor.extract_send_partition"
     )
-    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_span")
+    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_base_span")
     @mock.patch("opentelemetry.trace.set_span_in_context")
     @mock.patch("opentelemetry.propagate.inject")
     def test_wrap_send_with_topic_as_arg(
@@ -68,7 +67,7 @@ class TestUtils(TestCase):
     @mock.patch(
         "opentelemetry_instrumentation_kstreams.utils.KStreamsKafkaExtractor.extract_send_partition"
     )
-    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_span")
+    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_base_span")
     @mock.patch("opentelemetry.trace.set_span_in_context")
     @mock.patch("opentelemetry.propagate.inject")
     def test_wrap_send_with_topic_as_kwarg(
@@ -98,19 +97,22 @@ class TestUtils(TestCase):
         extract_bootstrap_servers: mock.MagicMock,
     ) -> None:
         tracer = mock.MagicMock()
+        record = mock.MagicMock()
         original_send_callback = mock.AsyncMock()
+        original_send_callback.return_value = record
         stream_engine = mock.MagicMock()
         stream_engine.backend = mock.MagicMock(spec_set=Kafka())
         client_id = "client_id"
         stream_engine._producer.client._client_id = client_id
         expected_span_name = _get_span_name("send", self.topic_name)
         wrapped_send = _wrap_send(tracer)
+
         retval = asyncio.run(
             wrapped_send(original_send_callback, stream_engine, self.args, self.kwargs)
         )
 
         extract_bootstrap_servers.assert_called_once_with(stream_engine.backend)
-        extract_send_partition.assert_called_once_with(self.args, self.kwargs)
+        extract_send_partition.assert_called_once_with(record)
         tracer.start_as_current_span.assert_called_once_with(
             expected_span_name, kind=SpanKind.PRODUCER
         )
@@ -120,7 +122,6 @@ class TestUtils(TestCase):
             span,
             extract_bootstrap_servers.return_value,
             self.topic_name,
-            extract_send_partition.return_value,
             client_id,
         )
 
@@ -174,12 +175,16 @@ class TestUtils(TestCase):
 
     @mock.patch("opentelemetry.trace.set_span_in_context")
     @mock.patch("opentelemetry.context.attach")
-    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_span")
+    @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_base_span")
+    @mock.patch(
+        "opentelemetry_instrumentation_kstreams.utils._enrich_span_with_record_info"
+    )
     @mock.patch("opentelemetry.context.detach")
     def test_create_consumer_span(
         self,
         detach: mock.MagicMock,
-        enrich_span: mock.MagicMock,
+        enrich_span_with_record_info: mock.MagicMock,
+        enrich_base_span: mock.MagicMock,
         attach: mock.MagicMock,
         set_span_in_context: mock.MagicMock,
     ) -> None:
@@ -196,6 +201,7 @@ class TestUtils(TestCase):
             extracted_context,
             bootstrap_servers,
             client_id,
+            None,  # TODO: wait for 0.49 to be released
             self.args,
             self.kwargs,
         )
@@ -211,17 +217,18 @@ class TestUtils(TestCase):
         set_span_in_context.assert_called_once_with(span, extracted_context)
         attach.assert_called_once_with(set_span_in_context.return_value)
 
-        enrich_span.assert_called_once_with(
-            span, bootstrap_servers, record.topic, record.partition, client_id
+        enrich_base_span.assert_called_once_with(
+            span,
+            bootstrap_servers,
+            record.topic,
+            client_id,
+        )
+
+        enrich_span_with_record_info.assert_called_once_with(
+            span,
+            record.topic,
+            record.partition,
+            record.offset,
         )
         # consume_hook.assert_called_once_with(span, record, self.args, self.kwargs)
         detach.assert_called_once_with(attach.return_value)
-
-    # @mock.patch("opentelemetry_instrumentation_kstreams.utils.KStreamsKafkaExtractor")
-    def test_kafka_properties_extractor(
-        self,
-        # kafka_properties_extractor: mock.MagicMock,
-    ):
-        assert (
-            KStreamsKafkaExtractor.extract_send_partition(self.args, self.kwargs) == 0
-        )
