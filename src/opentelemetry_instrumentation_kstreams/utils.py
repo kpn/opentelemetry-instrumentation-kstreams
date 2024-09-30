@@ -265,7 +265,7 @@ def _create_consumer_span(
         context.detach(token)
 
 
-def _wrap_anext(
+def _wrap_getone(
     tracer: Tracer,
 ) -> Callable:
     async def _traced_anext(func, instance: Stream, args, kwargs):
@@ -300,6 +300,3 @@ def _wrap_anext(
         return record
 
     return _traced_anext
-
-
-_wrap_getone = _wrap_anext

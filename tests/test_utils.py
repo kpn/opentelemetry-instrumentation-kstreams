@@ -21,7 +21,7 @@ from opentelemetry_instrumentation_kstreams.utils import (
     _get_span_name,
     _kstreams_getter,
     _kstreams_setter,
-    _wrap_anext,
+    _wrap_getone,
     _wrap_send,
 )
 from opentelemetry.trace import SpanKind
@@ -150,7 +150,7 @@ class TestUtils(TestCase):
         stream = mock.MagicMock()
         stream.backend = mock.MagicMock(spec_set=Kafka())
 
-        wrapped_next = _wrap_anext(tracer)
+        wrapped_next = _wrap_getone(tracer)
         record = await wrapped_next(
             original_next_callback, stream, self.args, self.kwargs
         )

@@ -7,7 +7,6 @@ from opentelemetry.instrumentation.utils import unwrap
 from wrapt import wrap_function_wrapper
 from .version import __version__
 from .utils import (
-    _wrap_anext,
     _wrap_send,
     _wrap_getone,
 )
@@ -38,17 +37,8 @@ class KStreamsInstrumentor(BaseInstrumentor):
             schema_url="https://opentelemetry.io/schemas/1.11.0",
         )
         wrap_function_wrapper(StreamEngine, "send", _wrap_send(tracer))
-
-        wrap_function_wrapper(Stream, "__anext__", _wrap_anext(tracer))
-
-        # kstreams > 0.13.0
-        if hasattr(Stream, "getone"):
-            wrap_function_wrapper(Stream, "getone", _wrap_getone(tracer))
+        wrap_function_wrapper(Stream, "getone", _wrap_getone(tracer))
 
     def _uninstrument(self, **kwargs: Any):
         unwrap(StreamEngine, "send")
-        unwrap(Stream, "__anext__")
-
-        # kstreams > 0.13.0
-        if hasattr(Stream, "getone"):
-            unwrap(Stream, "getone")
+        unwrap(Stream, "getone")

@@ -1,1 +1,1 @@
-_instruments = ("kstreams >= 0.12.0",)
+_instruments = ("kstreams >= 0.13.0",)
