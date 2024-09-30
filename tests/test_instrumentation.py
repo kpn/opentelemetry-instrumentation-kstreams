@@ -7,4 +7,4 @@ def test_instrument_api() -> None:
     instrumentation = KStreamsInstrumentor()
     instrumentation.instrument()
     assert isinstance(StreamEngine.send, BoundFunctionWrapper)
-    assert isinstance(Stream.__anext__, BoundFunctionWrapper)
+    assert isinstance(Stream.getone, BoundFunctionWrapper)
