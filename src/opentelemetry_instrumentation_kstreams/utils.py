@@ -1,18 +1,18 @@
 import json
 from logging import getLogger
-from typing import Any, Awaitable, Callable, Iterable, List, Optional, Union
+from typing import Any, Iterable, List, Optional, Union
 
-from kstreams import Send, Stream, StreamEngine, ConsumerRecord, RecordMetadata
+from kstreams import (
+    Stream,
+    StreamEngine,
+)
 from kstreams.backends.kafka import Kafka
-from opentelemetry import propagate, context, trace
 from opentelemetry.propagators import textmap
 from opentelemetry.semconv.trace import SpanAttributes
 
 # Enable after 0.49 is released
 # from opentelemetry.semconv._incubating.attributes import messaging_attributes as SpanAttributes
-from opentelemetry.trace import SpanKind, Tracer
 from opentelemetry.trace.span import Span
-from opentelemetry.context.context import Context
 
 _LOG = getLogger(__name__)
 
@@ -21,6 +21,21 @@ HeadersT = Union[list[tuple[str, Union[bytes, None]]], dict[str, Union[str, None
 
 
 class KStreamsContextGetter(textmap.Getter[HeadersT]):
+    """
+    KStreamsContextGetter is a custom implementation of the textmap.Getter interface
+    for extracting context from Kafka Streams headers.
+
+    Methods:
+        get(carrier: HeadersT, key: str) -> Optional[List[str]]:
+            Extracts the value associated with the given key from the carrier.
+            If the carrier is None or the key is not found, returns None.
+            If the value is found and is not None, it decodes the value and returns it as a list of strings.
+
+        keys(carrier: HeadersT) -> List[str]:
+            Returns a list of all keys present in the carrier.
+            If the carrier is None, returns an empty list.
+    """
+
     def get(self, carrier: HeadersT, key: str) -> Optional[List[str]]:
         if carrier is None:
             return None
@@ -45,6 +60,23 @@ class KStreamsContextGetter(textmap.Getter[HeadersT]):
 
 
 class KStreamsContextSetter(textmap.Setter[HeadersT]):
+    """
+    A context setter for KStreams that implements the textmap.Setter interface.
+
+    Methods:
+        set(carrier: HeadersT, key: str, value: Optional[str]) -> None
+            Sets a key-value pair in the carrier. If the carrier is a list, the key-value pair is appended.
+            If the carrier is a dictionary, the key-value pair is added or updated.
+
+            Parameters:
+                carrier : HeadersT
+                    The carrier to set the key-value pair in. Can be a list or a dictionary.
+                key : str
+                    The key to set in the carrier.
+                value : Optional[str]
+                    The value to set for the key in the carrier. If None, the key-value pair is not set.
+    """
+
     def set(self, carrier: HeadersT, key: str, value: Optional[str]) -> None:
         if carrier is None or key is None:
             return
@@ -175,128 +207,3 @@ def _enrich_span_with_record_info(
 
 def _get_span_name(operation: str, topic: str) -> str:
     return f"{topic} {operation}"
-
-
-def _wrap_send(tracer: Tracer) -> Callable:
-    async def _traced_send(
-        func: Send, instance: StreamEngine, args, kwargs
-    ) -> Awaitable[RecordMetadata]:
-        if not isinstance(instance.backend, Kafka):
-            raise NotImplementedError("Only Kafka backend is supported for now")
-
-        headers = KStreamsKafkaExtractor.extract_send_headers(args, kwargs)
-
-        if headers is None:
-            headers = []
-            kwargs["headers"] = headers
-        client_id = KStreamsKafkaExtractor.extract_producer_client_id(instance)
-        bootstrap_servers = KStreamsKafkaExtractor.extract_bootstrap_servers(
-            instance.backend
-        )
-        topic = KStreamsKafkaExtractor.extract_send_topic(args, kwargs)
-
-        span_name = _get_span_name("send", topic)
-        with tracer.start_as_current_span(span_name, kind=SpanKind.PRODUCER) as span:
-            _enrich_base_span(span, bootstrap_servers, topic, client_id)
-            propagate.inject(
-                headers,
-                context=trace.set_span_in_context(span),
-                setter=_kstreams_setter,
-            )
-            record_metadata = await func(*args, **kwargs)
-
-            partition = KStreamsKafkaExtractor.extract_send_partition(record_metadata)
-            offset = KStreamsKafkaExtractor.extract_send_offset(record_metadata)
-            _enrich_span_with_record_info(span, topic, partition, offset)
-
-        return record_metadata
-
-    return _traced_send
-
-
-def _create_consumer_span(
-    tracer: Tracer,
-    record: ConsumerRecord,
-    extracted_context: Context,
-    bootstrap_servers: List[str],
-    client_id: str,
-    consumer_group: Optional[str],
-    args: Any,
-    kwargs: Any,
-) -> None:
-    """
-    Creates and starts a consumer span for a given Kafka record.
-
-    Args:
-        tracer: The tracer instance used to create the span.
-        record: The Kafka consumer record for which the span is created.
-        extracted_context: The context extracted from the incoming message.
-        bootstrap_servers: List of bootstrap servers for the Kafka cluster.
-        client_id: The client ID of the Kafka consumer.
-        args: Additional positional arguments.
-        kwargs: Additional keyword arguments.
-
-    Returns:
-        None
-    """
-    span_name = _get_span_name("receive", record.topic)
-    with tracer.start_as_current_span(
-        span_name,
-        context=extracted_context,
-        kind=SpanKind.CONSUMER,
-    ) as span:
-        new_context = trace.set_span_in_context(span, extracted_context)
-        token = context.attach(new_context)
-        _enrich_base_span(
-            span,
-            bootstrap_servers,
-            record.topic,
-            client_id,
-        )
-        _enrich_span_with_record_info(
-            span, record.topic, record.partition, record.offset
-        )
-        # TODO: enable after 0.49 is released
-        # if consumer_group is not None:
-        #     span.set_attribute(
-        #         SpanAttributes.MESSAGING_CONSUMER_GROUP_NAME, consumer_group
-        #     )
-        # trace.set_span_in_context(span)
-        context.detach(token)
-
-
-def _wrap_getone(
-    tracer: Tracer,
-) -> Callable:
-    async def _traced_anext(func, instance: Stream, args, kwargs):
-        if not isinstance(instance.backend, Kafka):
-            raise NotImplementedError("Only Kafka backend is supported for now")
-        record: ConsumerRecord = await func(*args, **kwargs)
-        bootstrap_servers = KStreamsKafkaExtractor.extract_bootstrap_servers(
-            instance.backend
-        )
-        client_id = KStreamsKafkaExtractor.extract_consumer_client_id(instance)
-        # consumer_group = KStreamsKafkaExtractor.extract_consumer_group(
-        #     instance.consumer
-        # )
-        consumer_group = None
-        extracted_context: Context = propagate.extract(
-            record.headers, getter=_kstreams_getter
-        )
-
-        _create_consumer_span(
-            tracer,
-            record,
-            extracted_context,
-            bootstrap_servers,
-            client_id,
-            consumer_group,
-            args,
-            kwargs,
-        )
-        # instance._current_context_token = context.attach(
-        # )
-
-        return record
-
-    return _traced_anext
