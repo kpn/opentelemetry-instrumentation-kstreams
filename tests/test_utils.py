@@ -16,16 +16,23 @@
 import asyncio
 from unittest import TestCase, mock
 
+from kstreams import ConsumerRecord, StreamEngine
+from kstreams.backends.kafka import Kafka
+from kstreams.middleware import BaseMiddleware, ExceptionMiddleware, Middleware
+from kstreams.streams_utils import StreamErrorPolicy
+from opentelemetry.trace import SpanKind
+
+from opentelemetry_instrumentation_kstreams.instrumentor import KStreamsInstrumentor
+from opentelemetry_instrumentation_kstreams.middlewares import OpenTelemetryMiddleware
 from opentelemetry_instrumentation_kstreams.utils import (
-    _create_consumer_span,
     _get_span_name,
     _kstreams_getter,
     _kstreams_setter,
-    _wrap_getone,
+)
+from opentelemetry_instrumentation_kstreams.wrappers import (
+    _wrap_build_stream_middleware_stack,
     _wrap_send,
 )
-from opentelemetry.trace import SpanKind
-from kstreams.backends.kafka import Kafka
 
 
 class TestUtils(TestCase):
@@ -135,44 +142,6 @@ class TestUtils(TestCase):
         self.assertEqual(retval, original_send_callback.return_value)
 
     @mock.patch("opentelemetry.propagate.extract")
-    @mock.patch("opentelemetry_instrumentation_kstreams.utils._create_consumer_span")
-    @mock.patch(
-        "opentelemetry_instrumentation_kstreams.utils.KStreamsKafkaExtractor.extract_bootstrap_servers"
-    )
-    async def test_wrap_next(
-        self,
-        extract_bootstrap_servers: mock.MagicMock,
-        _create_consumer_span: mock.MagicMock,
-        extract: mock.MagicMock,
-    ) -> None:
-        tracer = mock.MagicMock()
-        original_next_callback = mock.MagicMock()
-        stream = mock.MagicMock()
-        stream.backend = mock.MagicMock(spec_set=Kafka())
-
-        wrapped_next = _wrap_getone(tracer)
-        record = await wrapped_next(
-            original_next_callback, stream, self.args, self.kwargs
-        )
-
-        extract_bootstrap_servers.assert_called_once_with(stream.backend)
-        bootstrap_servers = extract_bootstrap_servers.return_value
-
-        original_next_callback.assert_called_once_with(*self.args, **self.kwargs)
-        self.assertEqual(record, original_next_callback.return_value)
-
-        extract.assert_called_once_with(record.headers, getter=_kstreams_getter)
-        context = extract.return_value
-
-        _create_consumer_span.assert_called_once_with(
-            tracer,
-            record,
-            context,
-            bootstrap_servers,
-            self.args,
-            self.kwargs,
-        )
-
     @mock.patch("opentelemetry.trace.set_span_in_context")
     @mock.patch("opentelemetry.context.attach")
     @mock.patch("opentelemetry_instrumentation_kstreams.utils._enrich_base_span")
@@ -180,55 +149,116 @@ class TestUtils(TestCase):
         "opentelemetry_instrumentation_kstreams.utils._enrich_span_with_record_info"
     )
     @mock.patch("opentelemetry.context.detach")
-    def test_create_consumer_span(
+    def test_opentelemetry_middleware(
         self,
         detach: mock.MagicMock,
         enrich_span_with_record_info: mock.MagicMock,
         enrich_base_span: mock.MagicMock,
         attach: mock.MagicMock,
         set_span_in_context: mock.MagicMock,
+        extract: mock.MagicMock,
     ) -> None:
+        async def func(cr): ...
+
         tracer = mock.MagicMock()
-        # consume_hook = mock.MagicMock()
-        bootstrap_servers = mock.MagicMock()
-        extracted_context = mock.MagicMock()
+
+        next_call = func
+        send = mock.MagicMock()
+        stream = mock.MagicMock()
+        stream.backend = Kafka()
+        stream.consumer._client._client_id = "client_id"
+        stream.consumer.group_id = "consumer_group"
+
         record = mock.MagicMock()
-        client_id = mock.MagicMock()
-
-        _create_consumer_span(
-            tracer,
-            record,
-            extracted_context,
-            bootstrap_servers,
-            client_id,
-            None,  # TODO: wait for 0.49 to be released
-            self.args,
-            self.kwargs,
+        middleware = OpenTelemetryMiddleware(
+            next_call=next_call, send=send, stream=stream, tracer=tracer
         )
 
-        expected_span_name = _get_span_name("receive", record.topic)
+        assert middleware.bootstrap_servers == stream.backend.bootstrap_servers
+        assert middleware.client_id == "client_id"
+        assert middleware.consumer_group == "consumer_group"
 
-        tracer.start_as_current_span.assert_called_once_with(
-            expected_span_name,
-            context=extracted_context,
-            kind=SpanKind.CONSUMER,
-        )
-        span = tracer.start_as_current_span.return_value.__enter__()
-        set_span_in_context.assert_called_once_with(span, extracted_context)
+        asyncio.run(middleware(record))
+
+        extract.assert_called_once_with(record.headers, getter=_kstreams_getter)
+        tracer.start_as_current_span.assert_called_once()
         attach.assert_called_once_with(set_span_in_context.return_value)
+        detach.assert_called_once_with(attach.return_value)
+        span = tracer.start_as_current_span.return_value.__enter__()
 
         enrich_base_span.assert_called_once_with(
             span,
-            bootstrap_servers,
+            stream.backend.bootstrap_servers,
             record.topic,
-            client_id,
+            "client_id",
         )
-
         enrich_span_with_record_info.assert_called_once_with(
             span,
             record.topic,
             record.partition,
             record.offset,
         )
-        # consume_hook.assert_called_once_with(span, record, self.args, self.kwargs)
-        detach.assert_called_once_with(attach.return_value)
+
+    def test_build_stream_middleware_stack_receives_stream(self):
+        tracer = mock.MagicMock()
+        middlewares = []
+
+        func = mock.MagicMock()
+        instance = mock.MagicMock()
+        args = mock.MagicMock()
+        stream = mock.MagicMock()
+        stream.middlewares = middlewares
+        kwargs = {"stream": stream}
+
+        _wrap_build_stream_middleware_stack(tracer)(func, instance, args, kwargs)
+
+        first_middleware_class = stream.middlewares[0].middleware
+        assert first_middleware_class == OpenTelemetryMiddleware
+
+    def test_correct_stack_build(self):
+        KStreamsInstrumentor().instrument()
+
+        class S3Middleware(BaseMiddleware):
+            async def __call__(self, cr: ConsumerRecord):
+                print("Dummy backup to s3")
+                return await self.next_call(cr)
+
+        consumer_class = mock.MagicMock()
+        producer_class = mock.MagicMock()
+        monitor = mock.MagicMock()
+
+        # Create the stream with an extra middleware
+        stream = mock.MagicMock()
+        stream.middlewares = [Middleware(S3Middleware)]
+
+        backend = Kafka()
+        stream_engine = StreamEngine(
+            title="test stream",
+            backend=backend,
+            consumer_class=consumer_class,
+            producer_class=producer_class,
+            monitor=monitor,
+        )
+        stream_engine.add_stream(stream)
+        stream_engine.start()
+
+        # Build the middleware stack
+        stream_engine.build_stream_middleware_stack(
+            stream=stream, error_policy=StreamErrorPolicy.STOP_ENGINE
+        )
+        stream_engine.stop()
+
+        assert len(stream.middlewares) == 3
+
+        # In this case, we simulated the real workflow using the stream_engine
+        # so the first should be the ExceptionMiddleware
+        first_middleware_class = stream.middlewares[0].middleware
+        assert first_middleware_class == ExceptionMiddleware
+
+        # The second should be the OpenTelemetryMiddleware
+        second_middleware_class = stream.middlewares[1].middleware
+        assert second_middleware_class == OpenTelemetryMiddleware
+
+        # The third should be the S3Middleware
+        third_middleware_class = stream.middlewares[2].middleware
+        assert third_middleware_class == S3Middleware

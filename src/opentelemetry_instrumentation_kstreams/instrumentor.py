@@ -1,17 +1,18 @@
 from typing import Any, Collection
 
-from kstreams import StreamEngine, Stream
+from kstreams import Stream, StreamEngine
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
 from opentelemetry.instrumentation.utils import unwrap
 from wrapt import wrap_function_wrapper
-from .version import __version__
-from .utils import (
-    _wrap_send,
-    _wrap_getone,
-)
 
 from .package import _instruments
+from .version import __version__
+from .wrappers import (
+    # _wrap_getone,
+    _wrap_build_stream_middleware_stack,
+    _wrap_send,
+)
 
 
 class KStreamsInstrumentor(BaseInstrumentor):
@@ -37,8 +38,12 @@ class KStreamsInstrumentor(BaseInstrumentor):
             schema_url="https://opentelemetry.io/schemas/1.11.0",
         )
         wrap_function_wrapper(StreamEngine, "send", _wrap_send(tracer))
-        wrap_function_wrapper(Stream, "getone", _wrap_getone(tracer))
+        wrap_function_wrapper(
+            StreamEngine,
+            "build_stream_middleware_stack",
+            _wrap_build_stream_middleware_stack(tracer),
+        )
 
     def _uninstrument(self, **kwargs: Any):
         unwrap(StreamEngine, "send")
-        unwrap(Stream, "getone")
+        unwrap(Stream, "build_stream_middleware_stack")
