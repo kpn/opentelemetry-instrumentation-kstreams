@@ -2,7 +2,7 @@
 
 > OTEL for kstreams
 
-Version: `0.3.0`
+Version: `0.4.0`
 
 > [!IMPORTANT]
 > This instrumentation works only with [ksterams middlewares](https://kpn.github.io/kstreams/middleware/) after `v0.17.0`

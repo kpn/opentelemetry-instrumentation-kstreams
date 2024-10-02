@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.0 (2024-10-02)
+
+### BREAKING CHANGES
+
+- Introduce otel middleware and require kstream >= 0.17
+
 ## 0.3.0 (2024-09-30)
 
 ### BREAKING CHANGES

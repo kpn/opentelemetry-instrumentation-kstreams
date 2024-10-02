@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "opentelemetry-instrumentation-kstreams"
-version = "0.3.0"
+version = "0.4.0"
 description = "OTEL for kstreams"
 authors = ["Santiago Fraire Willemoes <santiago.fraire@kpn.com>"]
 readme = "README.md"
