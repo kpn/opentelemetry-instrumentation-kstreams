@@ -16,7 +16,7 @@
 import asyncio
 from unittest import TestCase, mock
 
-from kstreams import ConsumerRecord, StreamEngine
+from kstreams import ConsumerRecord, Stream, StreamEngine
 from kstreams.backends.kafka import Kafka
 from kstreams.middleware import BaseMiddleware, ExceptionMiddleware, Middleware
 from kstreams.streams_utils import StreamErrorPolicy
@@ -226,10 +226,16 @@ class TestUtils(TestCase):
         consumer_class = mock.MagicMock()
         producer_class = mock.MagicMock()
         monitor = mock.MagicMock()
-
+        func_mock = mock.MagicMock()
         # Create the stream with an extra middleware
-        stream = mock.MagicMock()
-        stream.middlewares = [Middleware(S3Middleware)]
+        stream = Stream(
+            topics=["test_topic"],
+            func=func_mock,
+            error_policy=StreamErrorPolicy.STOP,
+            consumer_class=consumer_class,
+            middlewares=[Middleware(S3Middleware)],
+        )
+        # stream.middlewares = [Middleware(S3Middleware)]
 
         backend = Kafka()
         stream_engine = StreamEngine(
@@ -243,22 +249,26 @@ class TestUtils(TestCase):
         stream_engine.start()
 
         # Build the middleware stack
-        stream_engine.build_stream_middleware_stack(
-            stream=stream, error_policy=StreamErrorPolicy.STOP_ENGINE
-        )
+        stream_engine._build_stream_middleware_stack(stream=stream)
         stream_engine.stop()
 
-        assert len(stream.middlewares) == 3
+        assert len(stream.get_middlewares(engine=stream_engine)) == 3
 
         # In this case, we simulated the real workflow using the stream_engine
         # so the first should be the ExceptionMiddleware
-        first_middleware_class = stream.middlewares[0].middleware
+        first_middleware_class = stream.get_middlewares(engine=stream_engine)[
+            0
+        ].middleware
         assert first_middleware_class == ExceptionMiddleware
 
         # The second should be the OpenTelemetryMiddleware
-        second_middleware_class = stream.middlewares[1].middleware
+        second_middleware_class = stream.get_middlewares(engine=stream_engine)[
+            1
+        ].middleware
         assert second_middleware_class == OpenTelemetryMiddleware
 
         # The third should be the S3Middleware
-        third_middleware_class = stream.middlewares[2].middleware
+        third_middleware_class = stream.get_middlewares(engine=stream_engine)[
+            2
+        ].middleware
         assert third_middleware_class == S3Middleware
