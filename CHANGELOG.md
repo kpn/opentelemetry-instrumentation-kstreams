@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.4.1 (2024-10-16)
+
+### Improvements
+
+- Instrument get_middlewares if available
+
 ## 0.4.0 (2024-10-02)
 
 ### BREAKING CHANGES
