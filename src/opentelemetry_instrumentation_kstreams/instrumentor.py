@@ -9,8 +9,8 @@ from wrapt import wrap_function_wrapper
 from .package import _instruments
 from .version import __version__
 from .wrappers import (
-    # _wrap_getone,
     _wrap_build_stream_middleware_stack,
+    _wrap_get_middlewares,
     _wrap_send,
 )
 
@@ -38,12 +38,26 @@ class KStreamsInstrumentor(BaseInstrumentor):
             schema_url="https://opentelemetry.io/schemas/1.11.0",
         )
         wrap_function_wrapper(StreamEngine, "send", _wrap_send(tracer))
-        wrap_function_wrapper(
-            StreamEngine,
-            "build_stream_middleware_stack",
-            _wrap_build_stream_middleware_stack(tracer),
-        )
+
+        # kstreams >= 0.24.1
+        if hasattr(Stream, "get_middlewares"):
+            wrap_function_wrapper(
+                Stream,
+                "get_middlewares",
+                _wrap_get_middlewares(tracer),
+            )
+        else:
+            wrap_function_wrapper(
+                StreamEngine,
+                "_build_stream_middleware_stack",
+                _wrap_build_stream_middleware_stack(tracer),
+            )
 
     def _uninstrument(self, **kwargs: Any):
         unwrap(StreamEngine, "send")
-        unwrap(Stream, "build_stream_middleware_stack")
+
+        # kstreams >= 0.24.1
+        if hasattr(Stream, "get_middlewares"):
+            unwrap(Stream, "get_middlewares")
+        else:
+            unwrap(StreamEngine, "_build_stream_middleware_stack")

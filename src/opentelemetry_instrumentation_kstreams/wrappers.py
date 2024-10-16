@@ -105,3 +105,27 @@ def _wrap_build_stream_middleware_stack(
         return next_call
 
     return _traced_build_stream_middleware_stack
+
+
+def _wrap_get_middlewares(
+    tracer: Tracer,
+) -> Callable:
+    def _traced_get_middlewares(
+        func, instance: Stream, args, kwargs
+    ) -> NextMiddlewareCall:
+        # let's check if otel is already present in the middlewares
+        if (
+            len(instance.middlewares) > 0
+            and instance.middlewares[0].middleware == OpenTelemetryMiddleware
+        ):
+            return func(*args, **kwargs)
+
+        instance.middlewares.insert(
+            0, middleware.Middleware(OpenTelemetryMiddleware, tracer=tracer)
+        )
+
+        next_call = func(*args, **kwargs)
+
+        return next_call
+
+    return _traced_get_middlewares
