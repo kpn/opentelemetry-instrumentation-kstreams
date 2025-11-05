@@ -235,7 +235,6 @@ class TestUtils(TestCase):
             consumer_class=consumer_class,
             middlewares=[Middleware(S3Middleware)],
         )
-        # stream.middlewares = [Middleware(S3Middleware)]
 
         backend = Kafka()
         stream_engine = StreamEngine(
@@ -246,11 +245,6 @@ class TestUtils(TestCase):
             monitor=monitor,
         )
         stream_engine.add_stream(stream)
-        stream_engine.start()
-
-        # Build the middleware stack
-        stream_engine._build_stream_middleware_stack(stream=stream)
-        stream_engine.stop()
 
         assert len(stream.get_middlewares(engine=stream_engine)) == 3
 

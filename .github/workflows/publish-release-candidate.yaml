@@ -1,0 +1,40 @@
+# Warning!! Only push to `rc` branch if your PR is passing all checks!
+name: Release Candidate
+
+on:
+  push:
+    branches:
+      - rc/*
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Setup python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Create bump and changelog
+      uses: commitizen-tools/commitizen-action@master
+      with:
+        push: false
+        prerelease: rc
+        devrelease: ${{ github.run_id }}${{ github.run_number }}
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-in-project: true
+        virtualenvs-create: true
+    - name: Install Dependencies
+      run: |
+        ./scripts/install
+    - name: Build package
+      run: poetry build
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
