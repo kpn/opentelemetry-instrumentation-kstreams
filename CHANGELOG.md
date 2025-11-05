@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.0 (2025-11-05)
+
+### BREAKING CHANGES
+
+- remove python38 and python39 support. Release candidate workflow added.
+
 ## 0.4.2 (2025-03-13)
 
 ### Improvements
