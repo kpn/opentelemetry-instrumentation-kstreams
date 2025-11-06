@@ -107,5 +107,7 @@ class OpenTelemetryMiddleware(middleware.BaseMiddleware):
             #         SpanAttributes.MESSAGING_CONSUMER_GROUP_NAME, self.consumer_group
             #     )
 
-            await self.next_call(cr)
+            result = await self.next_call(cr)  # type: ignore
             context.detach(context_token)
+
+        return result
