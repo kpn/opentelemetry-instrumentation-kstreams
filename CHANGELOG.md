@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.5.1 (2025-11-06)
+
+### Fixes
+
+- missing return added in OpenTelemetryMiddleware.__call__ to make sure that it works with async generators (#11)
+
 ## 0.5.0 (2025-11-05)
 
 ### BREAKING CHANGES
