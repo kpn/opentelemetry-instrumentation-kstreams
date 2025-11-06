@@ -10,6 +10,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+
     steps:
     - uses: actions/checkout@v5
       with:
@@ -25,6 +29,7 @@ jobs:
         push: false
         prerelease: rc
         devrelease: ${{ github.run_id }}${{ github.run_number }}
+        extra_requirements: 'cz-kpn'
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
